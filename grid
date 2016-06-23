@@ -1,0 +1,20 @@
+
+		cv::Point2f targetCorners[4];
+		targetCorners[0].x = -0.5; targetCorners[0].y = -0.5;
+		targetCorners[1].x = 5.5; targetCorners[1].y = -0.5;
+		targetCorners[2].x = 5.5; targetCorners[2].y = 5.5;
+		targetCorners[3].x = -0.5; targetCorners[3].y = 5.5;
+
+		//3x3 Transformationsmatrix
+		cv::Mat projMat(cv::Size(3, 3), CV_32FC1);
+		projMat = cv::getPerspectiveTransform(gameBoardPoints, targetCorners);
+		
+		cv::Mat 2DGrid(cv::Size(100, 100), CV_8UC1);
+
+		//change the perspective in the marker image using the previously calculated matrix
+		cv::warpPerspective(img_bgr, 2DGrid, projMat, cv::Size(100, 100));
+
+
+
+		//cv::line(img_bgr, p, p2, CV_RGB(255, 255, 255), 4, 7, 0);
+		cv::imshow(kWinName4, 2DGrid);
