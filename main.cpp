@@ -1,250 +1,262 @@
-//
-//  main.cpp
-//  ARTowerDefense
-//
-//  Created by Kevin Wu on 17/06/16.
-//  Copyright © 2016 Kevin Wu. All rights reserved.
-//
-#include <opencv2/opencv.hpp>
+#define GLFW_INCLUDE_GLU
+//#include <GL/glew.h>
+#include <glfw/glfw3.h>
+
+#define GL_BGR_EXT 0x80e0
+
+#include "DrawPrimitives.h"
 #include <iostream>
-#include <glfw/glfw3.h> /// this also includes other openGL headers
-#include "MarkerIdentification.h"
-#include "MarkerTracking.hpp"
-#include "PoseEstimation.h"
 #include <iomanip>
 
-using namespace cv;
+
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/opencv.hpp>
+
+#define _USE_MATH_DEFINES
+#include <math.h>
+
+#include "PoseEstimation.h"
+#include "MarkerTracker.h"
+
 using namespace std;
 
-int main(int argc, const char * argv[]) {
-    
-    int yolo = 0;
-    
-    //create heap on startup
-    CvMemStorage* memStorage =cvCreateMemStorage();
-    
-    /// Initialize values
-    int alpha_slider =85;
-    
-    VideoCapture cap(1); // open the default camera
-    if(!cap.isOpened()) { // check if we succeeded
-        std::cout << "No camera found!\n"; //In this case, we show the supplied video
-    }
-    Mat grayFrame;
-    namedWindow("Threshold Image",1);
-    createTrackbar("Threshold Trackbar", "Threshold Image", &alpha_slider, 255, NULL);
-    
-    int numberFrameCaptures = 0;
-    
-    for(;;)
-    {
-        Mat frame;
-        cap >> frame; // get a new frame from camera
-        
-        cvtColor(frame, grayFrame, CV_BGR2GRAY); //first parameter is input image, second parameter output image
-        
-        Mat thresholded;
-        
-        threshold(grayFrame, thresholded, alpha_slider, 255, CV_THRESH_BINARY); //applies thresholding to gray Image
-        
-        CvSeq* contours;
-        CvMat thresholded_(thresholded);
-        
-        cvFindContours(&thresholded_, memStorage, &contours);
-        
-        Point2f marker1MiddlePoint;
-        Point2f marker2MiddlePoint;
-        
-        int numberSeenContours = 0;
-        
-        //traversing all contours
-        for(; contours; contours = contours->h_next){
-            
-            
-            
-            if(numberSeenContours==2){
-                break;
-            }
-            
-            CvSeq* result = cvApproxPoly(contours, sizeof(CvContour), memStorage, CV_POLY_APPROX_DP, cvContourPerimeter(contours)*0.02);
-            
-            if(result->total!=4) continue;
-            
-            
-            Mat result_ = cvarrToMat(result);
-            Rect r = boundingRect(result_);
-            
-            //check for size
-            if (r.height<40 || r.width<40 || r.height>250|| r.width>250|| r.width > thresholded.cols - 10 || r.height > thresholded.rows - 10) {
-                continue;
-            }
-            
-            
-           
-            
-            const Point *rect = (const Point*) result_.data;
-            int npts = result_.rows;
-            
-            polylines(frame, &rect, &npts, 1, true, Scalar(0,0,255),2, CV_AA, 0);
-            
-            //4 by 4 Matrix;
-            Mat lineParamsMat(Size(4,4), CV_32F);
-            
-            //We are looking at one specific contour at this point
-            for(int i = 0;i<4;i++){
-                circle(frame, rect[i], 6, Scalar(0,255,0), -1);
-                
-                //We want to now create stripes that allow us to get the edge point with subpixel accuracy
-                
-                //distance between stripes or 1/7 of the distance between rectangle corners
-                double dx = (double)(rect[(i+1)%4].x-rect[i].x)/7.0;
-                double dy = (double)(rect[(i+1)%4].y-rect[i].y)/7.0;
-                
-                // Stripe size
-                int stripeLength = (int)(0.8*sqrt (dx*dx+dy*dy));
-                if (stripeLength < 5)
-                    stripeLength = 5;
-                
-                //make stripe length odd
-                stripeLength |= 1;
-                
-                Size stripeSize;
-                stripeSize.width = 3;
-                stripeSize.height = stripeLength;
-                
-                // Direction vectors
-                Point2f stripeVecX;
-                Point2f stripeVecY;
-                double diffLength = sqrt ( dx*dx+dy*dy );
-                stripeVecX.x = dx / diffLength;
-                stripeVecX.y = dy / diffLength;
-                stripeVecY.x = stripeVecX.y;
-                stripeVecY.y = -stripeVecX.x;
-                
-                Mat iplStripe(stripeSize, CV_8UC1);
-                
-                //Array for edge point centers
-                Point2f edgePoints[6];
-                
-                for (int j=1; j<7; ++j)
-                {
-                    double px = (double)rect[i].x+(double)j*dx;
-                    double py = (double)rect[i].y+(double)j*dy;
-                    
-                    Point p;
-                    p.x = (int)px;
-                    p.y = (int)py;
-                    
-                    cv::circle ( frame, p, 4, CV_RGB(0,0,255), -1);
-                    
-                    //Let's deal with Stripes
-                    Mat iplStripe( stripeSize, CV_8UC1 );
-                    
-                    //Iterate over Stripe Width
-                    for(int m = -1; m <=1; ++m) {
-                        // Stripe length
-                        for(int n = 0-(stripeLength/2); n <= stripeLength/2; ++n ) {
-                            Point2f subPixel;
-                            subPixel.x = (double)p.x + ((double)m * stripeVecX.x) + ((double)n * stripeVecY.x);
-                            subPixel.y = (double)p.y + ((double)m * stripeVecX.y) + ((double)n * stripeVecY.y);
-                            
-                            int pixel = subpixSampleSafe(grayFrame, subPixel);
-                            int w = m + 1;
-                            int h = n + ( stripeLength >> 1);
-                            //Define our stripe - pixel relations
-                            iplStripe.at<uchar>(h,w) = (uchar)pixel;
-                            circle (frame, subPixel, 2, CV_RGB(0,0,255), -1);
-                            
-                        }
-                    }
-                    edgePoints[j-1] = calculatePreciseEdgePoint(stripeLength, iplStripe, p, stripeVecY);
-                }
-                
-                //point parameters for line
-                Mat point_mat(Size(1, 6), CV_32FC2, edgePoints);
-                
-                //The line is stored in a column in the lineParamsMat Matrix
-                fitLine(point_mat, lineParamsMat.col(i), CV_DIST_L2, 0, 0.01, 0.01);
-            }
-            
-            if(numberSeenContours==0){
-                marker1MiddlePoint = findMarkerMiddlePoint(lineParamsMat);
-   
-            } else{
-                
-                marker2MiddlePoint = findMarkerMiddlePoint(lineParamsMat);
-      
-            }
-            
-            //We now try to rectify the marker. First, we need to calculate the projective matrix
-            Point2f destinationRectangle[4];
-            
-            //initialise destinationRectangle
-            initialiseMarkerRectangle(destinationRectangle);
-            
-            /*
-            // transfer screen coords to camera coords
-            for(int i = 0; i < 4; i++)
-            {
-                cornerPoints[i].x -= 160; //here you have to use your own camera resolution (x) * 0.5
-                cornerPoints[i].y = -cornerPoints[i].y + 120; //here you have to use your own camera resolution (y) * 0.5
-            }
-            
-            float resultMatrix[16];
-            estimateSquarePose( resultMatrix, (cv::Point2f*)cornerPoints, 0.045 );
-            
-            //this part is only for printing
-            for (int i = 0; i<4; ++i) {
-                for (int j = 0; j<4; ++j) {
-                    cout << setw(6);
-                    cout << setprecision(4);
-                    cout << resultMatrix[4*i+j] << " ";
-                }
-                cout << "\n";
-            }
-            cout << "\n";
-            float x,y,z;
-            x = resultMatrix[3];
-            y = resultMatrix[7];
-            z = resultMatrix[11];
-            cout << "length: " << sqrt(x*x+y*y+z*z) << "\n";
-            cout << "\n";
-             */
-            numberSeenContours++;
-            
-        }
-        
-        Point2f extrapolatedCorner1(marker1MiddlePoint.x, marker2MiddlePoint.y);
-        Point2f extrapolatedCorner2(marker2MiddlePoint.x, marker1MiddlePoint.y);
-        
-        Point2f gameBoardPoints[4];
-        gameBoardPoints[0] = extrapolatedCorner1;
-        gameBoardPoints[1] = extrapolatedCorner2;
-        gameBoardPoints[2] = marker1MiddlePoint;
-        gameBoardPoints[3] = marker2MiddlePoint;
-        
-        if(numberFrameCaptures > 6){
-            circle(frame, marker1MiddlePoint, 6, Scalar(0,255,255), -1);
-            circle(frame, marker2MiddlePoint, 6, Scalar(0,255,255), -1);
-            circle(frame, extrapolatedCorner1, 6, Scalar(0,255,255), -1);
-            circle(frame, extrapolatedCorner2, 6, Scalar(0,255,255), -1);
-        }
-        
-        imshow("Threshold Image", frame);
-        
-        
-        char keypress;
-        keypress = waitKey(30);
-        if(keypress==27) break;
-        
-        //Reinitialise heap- at end of processing loop
-        cvClearMemStorage(memStorage);
-        
-        numberFrameCaptures++;
-    }
-    
-    //release heap (program exit)
-    cvReleaseMemStorage(&memStorage);
-    
-    return 0;
+cv::VideoCapture cap;
+
+
+//camera settings
+const int camera_width = 640;
+const int camera_height = 480;
+const int virtual_camera_angle = 30;
+unsigned char bkgnd[camera_width*camera_height * 3];
+
+
+void initVideoStream(cv::VideoCapture &cap) {
+	if (cap.isOpened())
+		cap.release();
+
+	cap.open(0); // open the default camera
+	
+	if (cap.isOpened() == false) {
+		std::cout << "No webcam found, using a video file" << std::endl;
+		cap.open("MarkerMovie.mpg");
+		if (cap.isOpened() == false) {
+			std::cout << "No video file found. Exiting." << std::endl;
+			exit(0);
+		}
+	}
+
+}
+
+
+
+/* program & OpenGL initialization */
+void initGL(int argc, char *argv[])
+{
+	// initialize the GL library
+
+	// Added in Exercise 8 - End *****************************************************************
+	// pixel storage/packing stuff
+	glPixelStorei(GL_PACK_ALIGNMENT, 1); // for glReadPixels?
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // for glTexImage2D?
+	glPixelZoom(1.0, -1.0);
+	// Added in Exercise 8 - End *****************************************************************
+
+	// enable and set colors
+	glEnable(GL_COLOR_MATERIAL);
+	glClearColor(0, 0, 0, 1.0);
+
+	// enable and set depth parameters
+	glEnable(GL_DEPTH_TEST);
+	glClearDepth(1.0);
+
+	// light parameters
+	GLfloat light_pos[] = { 1.0, 1.0, 1.0, 0.0 };
+	GLfloat light_amb[] = { 0.2, 0.2, 0.2, 1.0 };
+	GLfloat light_dif[] = { 0.7, 0.7, 0.7, 1.0 };
+
+	// enable lighting
+	glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
+	glLightfv(GL_LIGHT0, GL_AMBIENT, light_amb);
+	glLightfv(GL_LIGHT0, GL_DIFFUSE, light_dif);
+	glEnable(GL_LIGHTING);
+	glEnable(GL_LIGHT0);
+
+
+}
+
+
+void display(GLFWwindow* window, const cv::Mat &img_bgr, float resultMatrix[16])
+{
+	// Added in Exercise 8 - Start *****************************************************************
+	memcpy(bkgnd, img_bgr.data, sizeof(bkgnd));
+	// Added in Exercise 8 - End *****************************************************************
+
+	int width0, height0;
+	glfwGetFramebufferSize(window, &width0, &height0);
+	//	reshape(window, width, height);
+
+	// clear buffers
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
+	// Added in Exercise 8 - Start *****************************************************************
+	// draw background image
+	glDisable(GL_DEPTH_TEST);
+
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadIdentity();
+	gluOrtho2D(0.0, camera_width, 0.0, camera_height);
+
+	glRasterPos2i(0, camera_height - 1);
+	glDrawPixels(camera_width, camera_height, GL_BGR_EXT, GL_UNSIGNED_BYTE, bkgnd);
+
+	glPopMatrix();
+
+	glEnable(GL_DEPTH_TEST);
+
+	// Added in Exercise 8 - End *****************************************************************
+
+	// move to marker-position
+	glMatrixMode(GL_MODELVIEW);
+
+	float resultTransposedMatrix[16];
+	for (int x = 0; x<4; ++x)
+	{
+		for (int y = 0; y<4; ++y)
+		{
+			resultTransposedMatrix[x * 4 + y] = resultMatrix[y * 4 + x];
+		}
+	}
+
+	//glLoadTransposeMatrixf( resultMatrix );
+	glLoadMatrixf(resultTransposedMatrix);
+	glRotatef(-90, 1, 0, 0);
+	glScalef(0.03, 0.03, 0.03);
+
+	// draw 3 white spheres
+	glColor4f(1.0, 1.0, 1.0, 1.0);
+	drawSphere(0.8, 10, 10);
+	glTranslatef(0.0, 0.8, 0.0);
+	drawSphere(0.6, 10, 10);
+	glTranslatef(0.0, 0.6, 0.0);
+	drawSphere(0.4, 10, 10);
+
+	// draw the eyes
+	glPushMatrix();
+	glColor4f(0.0, 0.0, 0.0, 1.0);
+	glTranslatef(0.2, 0.2, 0.2);
+	drawSphere(0.066, 10, 10);
+	glTranslatef(0, 0, -0.4);
+	drawSphere(0.066, 10, 10);
+	glPopMatrix();
+
+	// draw a nose
+	glColor4f(1.0, 0.5, 0.0, 1.0);
+	glTranslatef(0.3, 0.0, 0.0);
+	glRotatef(90, 0, 1, 0);
+	drawCone(0.1, 0.3, 10, 10);
+
+}
+
+
+void reshape(GLFWwindow* window, int width, int height) {
+
+	// set a whole-window viewport
+	glViewport(0, 0, (GLsizei)width, (GLsizei)height);
+
+	// create a perspective projection matrix
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+
+	// Note: Just setting the Perspective is an easy hack. In fact, the camera should be calibrated.
+	// With such a calibration we would get the projection matrix. This matrix could then be loaded 
+	// to GL_PROJECTION.
+	// If you are using another camera (which you'll do in most cases), you'll have to adjust the FOV
+	// value. How? Fiddle around: Move Marker to edge of display and check if you have to increase or 
+	// decrease.
+	gluPerspective(virtual_camera_angle, ((GLfloat)width / (GLfloat)height), 0.01, 100);
+
+	// invalidate display
+	//glutPostRedisplay();
+}
+
+
+int main(int argc, char* argv[])
+{
+
+	GLFWwindow* window;
+
+	/* Initialize the library */
+	if (!glfwInit())
+		return -1;
+
+
+	// initialize the window system
+	/* Create a windowed mode window and its OpenGL context */
+	window = glfwCreateWindow(camera_width, camera_height, "Exercise 8 - Combine", NULL, NULL);
+	if (!window)
+	{
+		glfwTerminate();
+		return -1;
+	}
+
+	// Set callback functions for GLFW
+	glfwSetFramebufferSizeCallback(window, reshape);
+
+	glfwMakeContextCurrent(window);
+	glfwSwapInterval(1);
+
+	int window_width, window_height;
+	glfwGetFramebufferSize(window, &window_width, &window_height);
+	reshape(window, window_width, window_height);
+
+	glViewport(0, 0, window_width, window_height);
+
+	// initialize the GL library
+	initGL(argc, argv);
+
+	// setup OpenCV
+
+	cv::Mat img_bgr;
+//	cv::Mat img_gray(img_bgr.size(), CV_8UC1);
+
+	initVideoStream(cap);
+	const double kMarkerSize = 0.048; // [m]
+	MarkerTracker markerTracker(kMarkerSize);
+
+	float resultMatrix[16];
+	/* Loop until the user closes the window */
+	while (!glfwWindowShouldClose(window))
+	{
+		/* Capture here */
+		cap >> img_bgr;
+
+		if (img_bgr.empty()) {
+			std::cout << "Could not query frame. Trying to reinitialize." << std::endl;
+			initVideoStream(cap);
+			cv::waitKey(1000); /// Wait for one sec.
+			continue;
+		}
+
+		/* Track a marker */
+		markerTracker.findMarker(img_bgr, resultMatrix);
+
+		/* Render here */
+		display(window, img_bgr, resultMatrix);
+
+		/* Swap front and back buffers */
+		glfwSwapBuffers(window);
+
+		/* Poll for and process events */
+		glfwPollEvents();
+	}
+
+	glfwTerminate();
+
+
+	return 0;
 }
