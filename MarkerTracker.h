@@ -9,6 +9,7 @@ const std::string kWinName1 = "Exercise 8 - Original Image";
 const std::string kWinName2 = "Exercise 8 - Converted Image";
 const std::string kWinName3 = "Exercise 8 - Stripe Image";
 const std::string kWinName4 = "Exercise 8 - Marker";
+const std::string kWinName5 = "Exercise 8 - Grid";
 
 class MarkerTracker{
 public:
@@ -29,6 +30,8 @@ public:
 	~MarkerTracker(){
 		cleanup();
 	}
+	
+	cv::Point2f relativeToAbsolute();
 	void findMarker( cv::Mat &img_bgr, float resultMatrix[16] );
 protected:
 	void init( );
@@ -39,6 +42,8 @@ protected:
 
 	cv::Mat img_gray;
 	cv::Mat img_mono;
+	cv::Mat grid;
+	cv::Mat iplMarker;
 
 	int thresh; // Threshold (gray to mono)
 	int bw_thresh; // threshold for (gray maker to ID image)
