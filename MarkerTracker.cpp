@@ -120,7 +120,7 @@ Point2f MarkerTracker::relativeToAbsolute() {
 	cv::Matx33f warp = warpMatrix;
 
 	// Punkt relative zum Spielfeld (Koordinaten des Punkts entsprechen Koordinaten relativ zum Spielfeld)
-	cv::Point2f relative_point = cv::Point2f(20, 10);
+	cv::Point2f relative_point = cv::Point2f(40, 80);
 
 	// Punkt mit der inversen projektiven Transformationsmatrix multiplizieren
 	cv::Point3f homogeneos = warp.inv() * relative_point;
